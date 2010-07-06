@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use Mail::Box::Maildir;
 use Mail::Message;
-use Mail::Message::Convert::EmailSimple;
+use Mail::Address;
 use Date::Parse;
 use Email::Simple;
 use Curses;
@@ -14,51 +14,75 @@ my $maildir = Mail::Box::Maildir->new(
 		folder => '/home/vincent/.mail/vincent@vincentkriek.nl/INBOX',
 	);
 
+#################################################
+## Init, create new curses, read messages from ##
+## folder                                      ##
+#################################################
 my $win = new Curses;
+my $offset = 0;
 noecho();
 curs_set(0);
-init_pair(1, COLOR_RED, COLOR_BLACK);
-my @messages = $maildir->messages();
-			print_inbox();
+
+my @messages = $maildir->messages;
+
+print_inbox();
 show_inbox();
+
+# Stop curses, restore settings
 endwin();
 
 sub print_message {
 	$win->clear;
 	my $message = $messages[shift];
+	my @from = $message->from;
+	my $text = "From: ".$from[0]->format."\n";
+	$text .= "To: ";
+	my @to = $message->to;
+	$text .= $_->format.", " foreach(@to);
+	$text .= "\nDate: ";
+	$text .= strftime("%A %d %B %Y %H:%M", localtime(str2time($message->get('date'))))."\n";
+	
+	$text .= "\n\n";
+	$text .= "-"x 80;
+	$text .= "\n\n";
+
 	if($message->body->isMultipart) {
-		$message = $message->body->part(0);
-		my $text = $message->decoded->string();
-		$win->addstr(10, 20, $text);
+		$text .= $message->body->part(0)->decoded->string;
 	} else {
-		$win->addstr(10, 20, $message->body->decoded->string());
+		$text .= $message->body->decoded->string;
+	}
+	my $i = 0;
+	for(split(/^/, $text)) {
+		$win->addstr($i++, 0, $_);
 	}
 }
 
 sub print_inbox {
-	my $cursor = shift // 0;
-	if($cursor < 0) {
-		$cursor = 0;
-	} elsif($cursor > @messages) {
-		$cursor = @messages;
-	}
-
-	my $offset = $cursor - $win->getmaxy + 1;
+	#my $offset = $cursor - $win->getmaxy + 1;
+	$win->clear;
 	if($offset < 0) {
 		$offset = 0;
+	} elsif($offset + $win->getmaxy > @messages) {
+		$offset = @messages - $win->getmaxy;
 	}
 
-	for (my $i = 0; $i < $win->getmaxy() && $i + $offset < @messages; $i++) {
-		if($cursor == $i + $offset) {
-			$win->attron(COLOR_PAIR(1));
-			inbox_print_message($messages[$i + $offset], $i, 1);
-			$win->attroff(COLOR_PAIR(1));
-		} else {
-			inbox_print_message($messages[$i + $offset], $i);
-		}
-
+	for (my $i = 0; $i < $win->getmaxy || $i + $offset < @messages; $i++) {
+		inbox_print_message($messages[$i + $offset], $i);
 	}
-	return $cursor;
+}
+
+sub scroll_cursor {
+	my $prev = shift;
+	my $new = shift;
+	if($new - $offset > $win->getmaxy - 1) {
+		$offset += $win->getmaxy;
+		print_inbox();
+	} elsif($new - $offset < 0) {
+		$offset -= $win->getmaxy;
+		print_inbox();
+	}
+	$win->addstr($new - $offset, 0, "> ");
+	$win->addstr($prev - $offset, 0, "  ");
 }
 
 sub inbox_print_message {
@@ -82,42 +106,42 @@ sub inbox_print_message {
 		$win->addstr($line, 20, substr($from[0]->address, 0, 30)."\n");
 	}
 	$_ = decode("MIME-Header", $message->get('subject')) || "(no subject)";
+	#$_ = $message->get('subject') || "(no subject)";
 	#my $subj = $message->study('subject');
-	#$subj = $subj->decodedBody(); 
+	#$subj = $subj->decodedBody; 
 	#Use of uninitialized value $decoded[0] in join or string at 
 	#/usr/share/perl5/vendor_perl/Mail/Message/Field/Full.pm line 317.
 	$win->addstr($line, 52, $_);
 }
 
 sub show_message {
-	my $message = shift;
+	print_message(shift);
 	while((my $ch = $win->getch) ne 'q') {
 		
 	}
-	
+	print_inbox();
 }
 
 sub show_inbox {
 	my $start = 0;
 	while((my $ch = $win->getch) ne 'q') {
 		if($ch eq 'j') {
-			$win->clear;
-			$start = print_inbox(++$start);
+			#$start = print_inbox(++$start);
+			scroll_cursor($start, $start + 1);
+			$start++;
 		} elsif($ch eq 'k') {
-			$win->clear;
-			$start = print_inbox(--$start);
+			scroll_cursor($start--, $start);
 		} elsif($ch eq "\n") {
-			print_message($start);
+			show_message($start);
 		} elsif($ch eq "G") {
 			$win->clear;
 			$start = @messages - 1;
 			print_inbox($start);
 		} elsif($ch eq "g") {
-			next unless $win->getch() eq 'g';
+			next unless $win->getch eq 'g';
 			$win->clear;
 			$start = 0;
 			print_inbox($start);
 		}
 	}
-	$win->refresh;
 }
