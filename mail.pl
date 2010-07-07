@@ -31,6 +31,7 @@ my $win = new Curses;
 my $offset = 0;
 start_color;
 use_default_colors();
+init_pair(1, COLOR_RED, COLOR_GREEN);
 noecho();
 curs_set(0);
 
@@ -46,6 +47,9 @@ show_inbox();
 # Stop curses, restore settings
 endwin();
 
+##
+# Print message to curses window, fullscreen
+##
 sub print_message {
 	$win->clear;
 	my $message = $messages[shift];
@@ -63,6 +67,7 @@ sub print_message {
 	$text .= "\n\n";
 	$win->addstr(0, 0, $text); #Print header to curses
 
+	# If a message has multiple part, take the first part || just take the body
 	if($message->body->isMultipart) {
 		$text = $message->body->part(0)->decoded->string;
 	} else {
@@ -82,9 +87,13 @@ sub print_message {
 		$win->addstr($text[$i]);
 	}
 
+	# Return the offset so we now if we are scrolled
 	return $offset if $i > $offset;
 }
 
+##
+# Print inbox to curses window full screen. Starts at oldest mail...
+##
 sub print_inbox {
 	$win->clear;
 	if($offset < 0) {
@@ -101,24 +110,42 @@ sub print_inbox {
 	scroll_cursor($start, $start);
 }
 
+##
+# Scrolls the cursor, and prints it
+##
 sub scroll_cursor {
 	my $prev = shift;
 	my $new = shift;
-	if($new - $offset > $win->getmaxy - 1) {
+
+	# if the new cursor is invalid, return the old one.
+	return $prev if $new >= @messages || $new < 0; 
+
+	# Check if the inbox window needs to switch page
+	if($new - $offset >= $win->getmaxy) {
 		$offset += $win->getmaxy;
 		print_inbox($new);
 	} elsif($new - $offset < 0) {
 		$offset -= $win->getmaxy;
 		print_inbox($new);
 	}
+
 	$win->addstr($prev - $offset, 0, "  ");
+	inbox_print_message($messages[$prev], $prev - $offset);
+	$win->attron(COLOR_PAIR(1));
 	$win->addstr($new - $offset, 0, "> ");
-	$win->attroff(COLOR_PAIR(3));
+	inbox_print_message($messages[$new], $new - $offset);
+	$win->attroff(COLOR_PAIR(1));
+	return $new;
 }
 
+##
+#  Print the message line to the curses window
+##
 sub inbox_print_message {
 	my $message = shift;
 	my $line = shift;
+
+	$win->addstr($line, 0, " "x$win->getmaxx);
 
 	$win->addstr($line, 2, 
 		strftime("%d-%m-%Y %H:%M", localtime(str2time($message->get('date')))));
@@ -140,13 +167,16 @@ sub inbox_print_message {
 	$win->addnstr($line, 52, $_, $win->getmaxx - 52);
 }
 
+##
+# Loop for reading mail, makes that you can scroll etc
+##
 sub show_message {
 	my $cursor = shift;
 	my $offset = 0;
 	print_message($cursor);
 	
-	$message->labels(seen => 1);
-	$message->labelsToFilename;
+	$messages[$cursor]->labels(seen => 1);
+	$messages[$cursor]->labelsToFilename;
 	while((my $ch = $win->getch) ne 'q') {
 		if($ch eq "\n") {
 			$offset = print_message($cursor, $win->getmaxy + $offset);
@@ -156,15 +186,16 @@ sub show_message {
 	print_inbox($cursor);
 }
 
+##
+# Inbox loop
+##
 sub show_inbox {
 	my $start = 0;
 	while((my $ch = $win->getch) ne 'q') {
 		if($ch eq 'j') {
-			#$start = print_inbox(++$start);
-			scroll_cursor($start, $start + 1);
-			$start++;
+			$start = scroll_cursor($start++, $start);
 		} elsif($ch eq 'k') {
-			scroll_cursor($start--, $start);
+			$start = scroll_cursor($start--, $start);
 		} elsif($ch eq "\n") {
 			show_message($start);
 		} elsif($ch eq "G") {
