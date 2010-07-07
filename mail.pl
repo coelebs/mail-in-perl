@@ -1,13 +1,22 @@
 #!/usr/bin/perl 
+################################################################################
+# My perl mail thing, TODO-list                                                #
+# TODO colors                                                                  #
+# TODO mailbox switching, maybe with sidebar oslt                              #
+# FIXME decode html mail, but not text                                         #
+################################################################################
 use strict;
 use warnings;
+use Encode;# qw(decode);
 use Mail::Box::Maildir;
 use Mail::Message;
 use Mail::Address;
+use Mail::Message::Convert::HtmlFormatText;
+use HTML::TreeBuilder;
+use HTML::FormatText;
 use Date::Parse;
 use Email::Simple;
 use Curses;
-use Encode qw(decode);
 use POSIX qw(strftime);
 
 my $maildir = Mail::Box::Maildir->new(
@@ -20,12 +29,18 @@ my $maildir = Mail::Box::Maildir->new(
 #################################################
 my $win = new Curses;
 my $offset = 0;
+start_color;
+use_default_colors();
 noecho();
 curs_set(0);
 
+#move all messages from new/ to cur/ 
+#This makes conky think they are read... Gmail however looks at the flags
+$maildir->acceptMessages; 
 my @messages = $maildir->messages;
 
-print_inbox();
+
+print_inbox(0);
 show_inbox();
 
 # Stop curses, restore settings
@@ -35,30 +50,42 @@ sub print_message {
 	$win->clear;
 	my $message = $messages[shift];
 	my @from = $message->from;
-	my $text = "From: ".$from[0]->format."\n";
-	$text .= "To: ";
 	my @to = $message->to;
-	$text .= $_->format.", " foreach(@to);
+	my $text = "From: ".decode("MIME-Header", $from[0]->format)."\n";
+	$text .= "To: ";
+	$text .= decode("MIME-Header", $_->format).", " foreach(@to);
 	$text .= "\nDate: ";
 	$text .= strftime("%A %d %B %Y %H:%M", localtime(str2time($message->get('date'))))."\n";
+	$text .= "Subject: ".decode("MIME-Header", $message->get('subject'))."\n";
 	
-	$text .= "\n\n";
+	$text .= "\n";
 	$text .= "-"x 80;
 	$text .= "\n\n";
+	$win->addstr(0, 0, $text); #Print header to curses
 
 	if($message->body->isMultipart) {
-		$text .= $message->body->part(0)->decoded->string;
+		$text = $message->body->part(0)->decoded->string;
 	} else {
-		$text .= $message->body->decoded->string;
+		$text = $message->body->decoded->string;
 	}
-	my $i = 0;
-	for(split(/^/, $text)) {
-		$win->addstr($i++, 0, $_);
+	my $offset = shift;
+	my @text = split(/^/, $text);
+	my $i;
+	if(@text > $offset) {
+		$i = $offset;
+	} else {
+		$i = 0;
 	}
+
+	for (; $i < @text; $i++) {
+		last unless $i % $win->getmaxy < $win->getmaxy - 7;
+		$win->addstr($text[$i]);
+	}
+
+	return $offset if $i > $offset;
 }
 
 sub print_inbox {
-	#my $offset = $cursor - $win->getmaxy + 1;
 	$win->clear;
 	if($offset < 0) {
 		$offset = 0;
@@ -69,6 +96,9 @@ sub print_inbox {
 	for (my $i = 0; $i < $win->getmaxy || $i + $offset < @messages; $i++) {
 		inbox_print_message($messages[$i + $offset], $i);
 	}
+
+	my $start = shift;
+	scroll_cursor($start, $start);
 }
 
 sub scroll_cursor {
@@ -76,23 +106,19 @@ sub scroll_cursor {
 	my $new = shift;
 	if($new - $offset > $win->getmaxy - 1) {
 		$offset += $win->getmaxy;
-		print_inbox();
+		print_inbox($new);
 	} elsif($new - $offset < 0) {
 		$offset -= $win->getmaxy;
-		print_inbox();
+		print_inbox($new);
 	}
-	$win->addstr($new - $offset, 0, "> ");
 	$win->addstr($prev - $offset, 0, "  ");
+	$win->addstr($new - $offset, 0, "> ");
+	$win->attroff(COLOR_PAIR(3));
 }
 
 sub inbox_print_message {
 	my $message = shift;
 	my $line = shift;
-	if(shift) {
-		$win->addstr($line, 0, "> ");
-	} else {
-		$win->addstr($line, 0, "  ");
-	}
 
 	$win->addstr($line, 2, 
 		strftime("%d-%m-%Y %H:%M", localtime(str2time($message->get('date')))));
@@ -111,15 +137,23 @@ sub inbox_print_message {
 	#$subj = $subj->decodedBody; 
 	#Use of uninitialized value $decoded[0] in join or string at 
 	#/usr/share/perl5/vendor_perl/Mail/Message/Field/Full.pm line 317.
-	$win->addstr($line, 52, $_);
+	$win->addnstr($line, 52, $_, $win->getmaxx - 52);
 }
 
 sub show_message {
-	print_message(shift);
+	my $cursor = shift;
+	my $offset = 0;
+	print_message($cursor);
+	
+	$message->labels(seen => 1);
+	$message->labelsToFilename;
 	while((my $ch = $win->getch) ne 'q') {
-		
+		if($ch eq "\n") {
+			$offset = print_message($cursor, $win->getmaxy + $offset);
+		}
 	}
-	print_inbox();
+
+	print_inbox($cursor);
 }
 
 sub show_inbox {
