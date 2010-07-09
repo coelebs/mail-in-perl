@@ -1,7 +1,6 @@
 #!/usr/bin/perl 
 ################################################################################
 # My perl mail thing, TODO-list                                                #
-# TODO colors                                                                  #
 # TODO mailbox switching, maybe with sidebar oslt                              #
 # FIXME decode html mail, but not text                                         #
 ################################################################################
@@ -31,7 +30,7 @@ my $win = new Curses;
 my $offset = 0;
 start_color;
 use_default_colors();
-init_pair(1, COLOR_RED, COLOR_GREEN);
+init_pair(1, COLOR_BLACK, COLOR_GREEN);
 noecho();
 curs_set(0);
 
@@ -55,27 +54,35 @@ sub print_message {
 	my $message = $messages[shift];
 	my @from = $message->from;
 	my @to = $message->to;
-	my $text = "From: ".decode("MIME-Header", $from[0]->format)."\n";
-	$text .= "To: ";
-	$text .= decode("MIME-Header", $_->format).", " foreach(@to);
-	$text .= "\nDate: ";
-	$text .= strftime("%A %d %B %Y %H:%M", localtime(str2time($message->get('date'))))."\n";
-	$text .= "Subject: ".decode("MIME-Header", $message->get('subject'))."\n";
-	
-	$text .= "\n";
-	$text .= "-"x 80;
-	$text .= "\n\n";
-	$win->addstr(0, 0, $text); #Print header to curses
+	$_ = "From: ".decode("MIME-Header", $from[0]->format)."\n";
+	$_ .= "To: ";
+	$_ .= decode("MIME-Header", $_->format).", " foreach(@to);
+	$_ .= "\nDate: ";
+	$_ .= strftime("%A %d %B %Y %H:%M", localtime(str2time($message->get('date'))))."\n";
+	$_ .= "Subject: ".decode("MIME-Header", $message->get('subject'))."\n";
+	$win->attron(COLOR_PAIR(1));
+	my $i = 0;
+	foreach (split(/^/, $_)) {
+		$win->addstr($i++, 0, " "x$win->getmaxx);
+	}
+	$win->addstr(0, 0, $_); #Print header to curses
+	$win->attroff(COLOR_PAIR(1));
 
 	# If a message has multiple part, take the first part || just take the body
+	# FIXME html decoding has to go here...
+	my $formatter = Mail::Message::Convert::HtmlFormatText->new;
+
+	my $body;
 	if($message->body->isMultipart) {
-		$text = $message->body->part(0)->decoded->string;
+		$body = $message->body->epilogue || $message->body->preamble;
+		$_ = $message->body->part(0)->decoded->string;
 	} else {
-		$text = $message->body->decoded->string;
+		$_ = $message->body->decoded->string;
 	}
+
 	my $offset = shift;
-	my @text = split(/^/, $text);
-	my $i;
+	my @text = split(/^/, $_);
+	$i;
 	if(@text > $offset) {
 		$i = $offset;
 	} else {
@@ -112,6 +119,8 @@ sub print_inbox {
 
 ##
 # Scrolls the cursor, and prints it
+# it gives the current cursorline a different color, and yes that was stolen,
+# like everything else, from mutt
 ##
 sub scroll_cursor {
 	my $prev = shift;
@@ -146,6 +155,8 @@ sub inbox_print_message {
 	my $line = shift;
 
 	$win->addstr($line, 0, " "x$win->getmaxx);
+	
+	$win->addstr($line, 1, "2") if $message->body->isMultipart;
 
 	$win->addstr($line, 2, 
 		strftime("%d-%m-%Y %H:%M", localtime(str2time($message->get('date')))));
@@ -154,9 +165,9 @@ sub inbox_print_message {
 		$_ = $from[0]->phrase;
 		$_ = decode('MIME-Header', $_);
 		s/["](.*)["]/$1/;
-		$win->addstr($line, 20, substr($_, 0, 30)."\n");
+		$win->addstr($line, 20, substr($_, 0, 30));
 	} else {
-		$win->addstr($line, 20, substr($from[0]->address, 0, 30)."\n");
+		$win->addstr($line, 20, substr($from[0]->address, 0, 30));
 	}
 	$_ = decode("MIME-Header", $message->get('subject')) || "(no subject)";
 	#$_ = $message->get('subject') || "(no subject)";
