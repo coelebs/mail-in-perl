@@ -30,8 +30,7 @@ my $win = new Curses;
 my $offset = 0;
 start_color;
 use_default_colors();
-init_pair(1, COLOR_RED, -1);
-init_pair(2, COLOR_WHITE, COLOR_GREEN);
+init_pair(1, COLOR_BLACK, COLOR_GREEN);
 noecho();
 curs_set(0);
 
@@ -55,25 +54,19 @@ sub print_message {
 	my $message = $messages[shift];
 	my @from = $message->from;
 	my @to = $message->to;
-	my $header = "From: ".decode("MIME-Header", $from[0]->format)."\n";
-	$header .= "To: ";
-	$header .= decode("MIME-Header", $_->format).", " foreach(@to);
-	$header .= "\nDate: ";
-	$header .= strftime("%A %d %B %Y %H:%M", localtime(str2time($message->get('date'))))."\n";
-	$header .= "Subject: ".decode("MIME-Header", $message->get('subject'))."\n";
-	my @header = split(/\n/, $header);
-	$win->attron(COLOR_PAIR(2));
+	$_ = "From: ".decode("MIME-Header", $from[0]->format)."\n";
+	$_ .= "To: ";
+	$_ .= decode("MIME-Header", $_->format).", " foreach(@to);
+	$_ .= "\nDate: ";
+	$_ .= strftime("%A %d %B %Y %H:%M", localtime(str2time($message->get('date'))))."\n";
+	$_ .= "Subject: ".decode("MIME-Header", $message->get('subject'))."\n";
+	$win->attron(COLOR_PAIR(1));
 	my $i = 0;
-	foreach (@header) {
-		$win->addstr($i, 0, " "x$win->getmaxx);
-		$win->addstr($i, 0, $_);
-		$i++;
+	foreach (split(/^/, $_)) {
+		$win->addstr($i++, 0, " "x$win->getmaxx);
 	}
-	#Set cursor to next line, to avoid the message to be printed right after
-	#the subject header
-	$win->addstr($i++, 0, "");
-
-	$win->attroff(COLOR_PAIR(2));
+	$win->addstr(0, 0, $_); #Print header to curses
+	$win->attroff(COLOR_PAIR(1));
 
 	# If a message has multiple part, take the first part || just take the body
 	# FIXME html decoding has to go here...
@@ -89,6 +82,7 @@ sub print_message {
 
 	my $offset = shift;
 	my @text = split(/^/, $_);
+	$i;
 	if(@text > $offset) {
 		$i = $offset;
 	} else {
