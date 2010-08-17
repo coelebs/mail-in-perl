@@ -19,7 +19,8 @@ use Curses;
 use POSIX qw(strftime);
 
 my $maildir = Mail::Box::Maildir->new(
-		folder => '/home/vincent/.mail/vincent@vincentkriek.nl/INBOX',
+#		folder => '/home/vincent/.mail/vincent@vincentkriek.nl/[Gmail].All Mail/',
+		folder => '/home/vincent/.mail/vincent@vincentkriek.nl/INBOX/',
 	);
 
 #################################################
@@ -105,11 +106,11 @@ sub print_inbox {
 	$win->clear;
 	if($offset < 0) {
 		$offset = 0;
-	} elsif($offset + $win->getmaxy > @messages) {
-		$offset = @messages - $win->getmaxy;
+    } elsif($offset > @messages) {
+        $offset = @messages;
 	}
 
-	for (my $i = 0; $i < $win->getmaxy || $i + $offset < @messages; $i++) {
+	for (my $i = 0; $i < $win->getmaxy && $i + $offset < @messages; $i++) {
 		inbox_print_message($messages[$i + $offset], $i);
 	}
 
